@@ -1,0 +1,7 @@
+{
+  "item.create_physics_gun.physics_gun": "Zero-Point Physics Gun",
+  "item.create_physics_gun.physics_gun.tooltip.grab": "Right Click to grab and hold objects",
+  "item.create_physics_gun.physics_gun.tooltip.punt": "Left Click to punt held objects away",
+  "item.create_physics_gun.physics_gun.tooltip.scroll": "Scroll while grabbing to push or pull",
+  "itemGroup.create_physics_gun": "Create: Physics Gun"
+}
