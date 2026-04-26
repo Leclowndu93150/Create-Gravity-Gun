@@ -1,6 +1,10 @@
 package com.leclowndu93150.create_gravity_gun.server;
 
+import com.leclowndu93150.create_gravity_gun.config.GravityGunConfig;
 import com.leclowndu93150.create_gravity_gun.item.GravityGunItem;
+import com.leclowndu93150.create_gravity_gun.network.GravityGunFeedbackPacket;
+import com.leclowndu93150.create_gravity_gun.registry.GravityGunComponents;
+import net.minecraft.world.item.ItemStack;
 import com.leclowndu93150.create_gravity_gun.network.GravityGunMotionPacket;
 import com.leclowndu93150.create_gravity_gun.network.GravityGunPacket;
 import com.leclowndu93150.create_gravity_gun.network.GravityGunSyncPacket;
@@ -32,22 +36,25 @@ import java.util.UUID;
 
 public final class GravityGunServerHandler {
     public static final double TICKS_PER_SECOND = 20.0;
-    public static final double GRAB_RANGE = 24.0;
     public static final float ENTITY_PICK_RADIUS = 1.0f;
     public static final double ENTITY_SEARCH_RADIUS = 2.0;
     public static final double DEFAULT_HOLD_DISTANCE = 2.75;
-    public static final double MIN_HOLD = 1.5;
-    public static final double MAX_HOLD = 12.0;
     public static final double MAX_DISPLACEMENT = 4.0;
     public static final double CARRY_BASE_DISTANCE = 0.61;
     public static final double CARRY_PLAYER_RADIUS = 0.3;
     public static final double CARRY_RADIUS_SCALE = 2.0;
-    public static final double CARRY_MAX_SPEED = 25.4;
-    public static final double MAX_LINEAR_DELTA_V = CARRY_MAX_SPEED * 2.0;
     public static final double MAX_ANGULAR_DELTA_V = Math.toRadians(360.0 * 10.0);
-    public static final double PUNT_VELOCITY = 38.1;
-    public static final double ENTITY_CARRY_MAX_SPEED = CARRY_MAX_SPEED / TICKS_PER_SECOND;
-    public static final double ENTITY_MAX_LINEAR_DELTA_V = MAX_LINEAR_DELTA_V / TICKS_PER_SECOND;
+
+    private static double grabRange() { return GravityGunConfig.grabRange; }
+    private static double minHold() { return GravityGunConfig.minHoldDistance; }
+    private static double maxHold() { return GravityGunConfig.maxHoldDistance; }
+    private static double carryMaxSpeed() { return GravityGunConfig.carryMaxSpeed; }
+    private static double maxLinearDeltaV() { return carryMaxSpeed() * 2.0; }
+    private static double puntVelocity() { return GravityGunConfig.puntVelocity; }
+    private static double entityCarryMaxSpeed() { return carryMaxSpeed() / TICKS_PER_SECOND; }
+    private static double entityMaxLinearDeltaV() { return maxLinearDeltaV() / TICKS_PER_SECOND; }
+    private static double maxPickupMass() { return GravityGunConfig.maxPickupMass; }
+    private static long denySoundCooldownTicks() { return GravityGunConfig.denySoundCooldownTicks; }
 
     private static final Map<UUID, GrabState> STATES = new Object2ObjectOpenHashMap<>();
 
@@ -67,16 +74,31 @@ public final class GravityGunServerHandler {
             case TOGGLE_GRAB -> handleToggle(player, state);
             case PUNT -> handlePunt(player, state);
             case ADJUST_DISTANCE -> {
-                state.holdDistance = Math.max(MIN_HOLD, Math.min(MAX_HOLD, state.holdDistance + packet.dy()));
+                state.holdDistance = Math.max(minHold(), Math.min(maxHold(), state.holdDistance + packet.dy()));
             }
+            case TOGGLE_SOUNDS -> toggleSounds(player);
         }
+    }
+
+    private static void toggleSounds(final ServerPlayer player) {
+        final ItemStack stack = gunStack(player);
+        if (stack == null) return;
+        final boolean current = stack.getOrDefault(GravityGunComponents.SOUNDS_ENABLED.get(), Boolean.TRUE);
+        stack.set(GravityGunComponents.SOUNDS_ENABLED.get(), !current);
+    }
+
+    private static ItemStack gunStack(final ServerPlayer player) {
+        if (player.getMainHandItem().getItem() instanceof GravityGunItem) return player.getMainHandItem();
+        if (player.getOffhandItem().getItem() instanceof GravityGunItem) return player.getOffhandItem();
+        return null;
     }
 
     private static void handleToggle(final ServerPlayer player, final GrabState state) {
         if (state.isHolding()) {
-            releaseGrabbed(state);
+            releaseGrabbed(player, state);
             state.clear();
             syncNone(player);
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.DROP);
             return;
         }
         final ServerLevel level = player.serverLevel();
@@ -89,43 +111,82 @@ public final class GravityGunServerHandler {
             state.holdDistance = holdDistance(entity.getBoundingBox(), look);
             state.freshGrab = true;
             PacketDistributor.sendToPlayer(player, GravityGunSyncPacket.entity(entity.getId()));
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.PICKUP);
             return;
         }
 
         final ServerSubLevel sub = pickSubLevel(level, eye, look);
         if (sub != null) {
+            final MassData mass = sub.getMassTracker();
+            if (mass != null && !mass.isInvalid() && mass.getMass() > maxPickupMass()) {
+                playDenySound(player, state);
+                return;
+            }
             state.grabbedSubLevel = sub;
             state.subLevelLocalAnchor.set(localCenterOfMass(sub));
             state.holdDistance = holdDistance(sub.boundingBox(), look);
             state.freshGrab = true;
             PacketDistributor.sendToPlayer(player, GravityGunSyncPacket.subLevel(sub.getUniqueId(),
                     state.subLevelLocalAnchor.x, state.subLevelLocalAnchor.y, state.subLevelLocalAnchor.z));
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.PICKUP);
+            return;
         }
+
+        playDenySound(player, state);
+    }
+
+    private static void playDenySound(final ServerPlayer player, final GrabState state) {
+        final long now = player.serverLevel().getGameTime();
+        if (now - state.lastDenyTick < denySoundCooldownTicks()) return;
+        state.lastDenyTick = now;
+        sendFeedback(player, GravityGunFeedbackPacket.Kind.TOO_HEAVY);
+    }
+
+    private static void sendFeedback(final ServerPlayer player, final GravityGunFeedbackPacket.Kind kind) {
+        if (!soundsEnabled(player)) return;
+        PacketDistributor.sendToPlayer(player, new GravityGunFeedbackPacket(kind));
+    }
+
+    private static boolean soundsEnabled(final ServerPlayer player) {
+        final ItemStack stack = gunStack(player);
+        if (stack == null) return true;
+        return stack.getOrDefault(GravityGunComponents.SOUNDS_ENABLED.get(), Boolean.TRUE);
     }
 
     private static void handlePunt(final ServerPlayer player, final GrabState state) {
         final Vec3 look = player.getLookAngle();
         if (state.grabbedSubLevel != null && !state.grabbedSubLevel.isRemoved()) {
-            puntSubLevel(player, state.grabbedSubLevel, look, PUNT_VELOCITY);
+            puntSubLevel(player, state.grabbedSubLevel, look, puntVelocity());
             state.clear();
             syncNone(player);
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.LAUNCH);
             return;
         }
         if (state.grabbedEntity != null && state.grabbedEntity.isAlive()) {
-            puntEntity(state.grabbedEntity, look, PUNT_VELOCITY);
+            puntEntity(state.grabbedEntity, look, puntVelocity());
             state.clear();
             syncNone(player);
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.LAUNCH);
             return;
         }
         final Entity e = pickEntity(player, player.getEyePosition(), look);
         if (e != null) {
-            puntEntity(e, look, PUNT_VELOCITY * 0.5);
+            shoveEntity(e, look, puntVelocity() * 0.5);
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.LAUNCH);
             return;
         }
-        final ServerSubLevel sub = pickSubLevel(player.serverLevel(), player.getEyePosition(), look);
-        if (sub != null) {
-            puntSubLevel(player, sub, look, PUNT_VELOCITY * 0.5);
+        final SubLevelHit subHit = pickSubLevelHit(player.serverLevel(), player.getEyePosition(), look);
+        if (subHit != null) {
+            final MassData mass = subHit.sub().getMassTracker();
+            if (mass != null && !mass.isInvalid() && mass.getMass() > maxPickupMass()) {
+                playDenySound(player, state);
+                return;
+            }
+            puntSubLevelOffCenter(player, subHit.sub(), subHit.hit(), look, puntVelocity() * 0.5);
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.LAUNCH);
+            return;
         }
+        sendFeedback(player, GravityGunFeedbackPacket.Kind.DRYFIRE);
     }
 
     public static void tickAll(final MinecraftServer server) {
@@ -134,9 +195,11 @@ public final class GravityGunServerHandler {
             if (player == null) return true;
             final GrabState s = entry.getValue();
             if (!isHoldingGun(player)) {
-                releaseGrabbed(s);
+                final boolean wasHolding = s.isHolding();
+                releaseGrabbed(player, s);
                 s.clear();
                 syncNone(player);
+                if (wasHolding) sendFeedback(player, GravityGunFeedbackPacket.Kind.DROP);
                 return false;
             }
             tickPlayer(player, s);
@@ -153,12 +216,14 @@ public final class GravityGunServerHandler {
         if (state.grabbedSubLevel != null && state.grabbedSubLevel.isRemoved()) {
             state.clear();
             syncNone(player);
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.DROP);
             return;
         }
         if (state.grabbedEntity != null && !state.grabbedEntity.isAlive()) {
-            releaseGrabbed(state);
+            releaseGrabbed(player, state);
             state.clear();
             syncNone(player);
+            sendFeedback(player, GravityGunFeedbackPacket.Kind.DROP);
             return;
         }
 
@@ -192,7 +257,7 @@ public final class GravityGunServerHandler {
         Rapier3D.getAngularVelocity(sceneId, bodyId, angVel);
 
         if (fresh) {
-            final Vector3d linearStop = clamp(new Vector3d(-linVel[0], -linVel[1], -linVel[2]), MAX_LINEAR_DELTA_V);
+            final Vector3d linearStop = clamp(new Vector3d(-linVel[0], -linVel[1], -linVel[2]), maxLinearDeltaV());
             final Vector3d angularStop = clamp(new Vector3d(-angVel[0], -angVel[1], -angVel[2]), MAX_ANGULAR_DELTA_V);
             Rapier3D.addLinearAngularVelocities(sceneId, bodyId,
                     linearStop.x, linearStop.y, linearStop.z,
@@ -206,7 +271,7 @@ public final class GravityGunServerHandler {
                 desiredVelocity.x - linVel[0],
                 desiredVelocity.y - linVel[1],
                 desiredVelocity.z - linVel[2]
-        ), MAX_LINEAR_DELTA_V);
+        ), maxLinearDeltaV());
         final Vector3d angularDelta = clamp(new Vector3d(
                 -angVel[0] * 0.5,
                 -angVel[1] * 0.5,
@@ -224,7 +289,7 @@ public final class GravityGunServerHandler {
         final Vec3 vel = entity.getDeltaMovement();
 
         if (fresh) {
-            final Vec3 stop = clamp(vel.scale(-1.0), ENTITY_MAX_LINEAR_DELTA_V);
+            final Vec3 stop = clamp(vel.scale(-1.0), entityMaxLinearDeltaV());
             final Vec3 next = vel.add(stop);
             applyEntityVelocity(entity, next);
             return;
@@ -235,7 +300,7 @@ public final class GravityGunServerHandler {
                 desiredVelocity.x - vel.x,
                 desiredVelocity.y - vel.y,
                 desiredVelocity.z - vel.z
-        ), ENTITY_MAX_LINEAR_DELTA_V);
+        ), entityMaxLinearDeltaV());
 
         applyEntityVelocity(entity, vel.add(delta));
     }
@@ -250,7 +315,7 @@ public final class GravityGunServerHandler {
         }
     }
 
-    private static void releaseGrabbed(final GrabState state) {
+    private static void releaseGrabbed(final ServerPlayer holder, final GrabState state) {
         if (state.grabbedEntity instanceof final ServerPlayer grabbed) {
             PacketDistributor.sendToPlayer(grabbed, GravityGunMotionPacket.clear());
         }
@@ -269,6 +334,32 @@ public final class GravityGunServerHandler {
                 0.0, 0.0, 0.0, true);
     }
 
+    private static void puntSubLevelOffCenter(final ServerPlayer player, final ServerSubLevel sub, final Vec3 hitWorld,
+                                              final Vec3 look, final double speed) {
+        final ServerLevel level = player.serverLevel();
+        final SubLevelPhysicsSystem system = SubLevelPhysicsSystem.get(level);
+        if (system == null) return;
+        final int sceneId = Rapier3D.getID(level);
+        final int bodyId = sub.getRuntimeId();
+        if (bodyId == PhysicsPipelineBody.NULL_RUNTIME_ID) return;
+
+        final MassData mass = sub.getMassTracker();
+        final double bodyMass = mass != null && !mass.isInvalid() ? Math.max(mass.getMass(), 1.0) : 10.0;
+
+        final Vector3d comWorld = sub.logicalPose().transformPosition(localCenterOfMass(sub), new Vector3d());
+        final Vector3d arm = new Vector3d(hitWorld.x - comWorld.x, hitWorld.y - comWorld.y, hitWorld.z - comWorld.z);
+
+        final Vector3d forceDir = new Vector3d(look.x, look.y, look.z);
+        final double impulse = bodyMass * speed;
+        final Vector3d force = new Vector3d(forceDir).mul(impulse);
+        final Vector3d torque = arm.cross(force, new Vector3d());
+
+        Rapier3D.applyForceAndTorque(sceneId, bodyId,
+                force.x, force.y, force.z,
+                torque.x, torque.y, torque.z,
+                true);
+    }
+
     private static void puntEntity(final Entity entity, final Vec3 look, final double speed) {
         final double tickSpeed = speed / TICKS_PER_SECOND;
         final Vec3 v = new Vec3(look.x * tickSpeed, look.y * tickSpeed + 0.2, look.z * tickSpeed);
@@ -281,8 +372,20 @@ public final class GravityGunServerHandler {
         }
     }
 
+    private static void shoveEntity(final Entity entity, final Vec3 look, final double speed) {
+        final double tickSpeed = speed / TICKS_PER_SECOND;
+        final Vec3 v = new Vec3(look.x * tickSpeed, look.y * tickSpeed + 0.15, look.z * tickSpeed);
+        entity.setDeltaMovement(entity.getDeltaMovement().add(v));
+        entity.fallDistance = 0.0f;
+        entity.hasImpulse = true;
+        entity.hurtMarked = true;
+        if (entity instanceof final ServerPlayer grabbed) {
+            PacketDistributor.sendToPlayer(grabbed, GravityGunMotionPacket.clear());
+        }
+    }
+
     private static Entity pickEntity(final ServerPlayer player, final Vec3 eye, final Vec3 look) {
-        final Vec3 end = eye.add(look.scale(GRAB_RANGE));
+        final Vec3 end = eye.add(look.scale(grabRange()));
         final AABB box = new AABB(eye, end).inflate(ENTITY_SEARCH_RADIUS);
         final EntityHitResult hit = ProjectileUtil.getEntityHitResult(player.level(), player, eye, end, box,
                 e -> e.isAlive() && e.isPickable() && e != player, ENTITY_PICK_RADIUS);
@@ -290,12 +393,18 @@ public final class GravityGunServerHandler {
     }
 
     private static ServerSubLevel pickSubLevel(final ServerLevel level, final Vec3 eye, final Vec3 look) {
-        final Vec3 end = eye.add(look.scale(GRAB_RANGE));
+        final SubLevelHit hit = pickSubLevelHit(level, eye, look);
+        return hit == null ? null : hit.sub;
+    }
+
+    private static SubLevelHit pickSubLevelHit(final ServerLevel level, final Vec3 eye, final Vec3 look) {
+        final Vec3 end = eye.add(look.scale(grabRange()));
         final BoundingBox3d aabb = new BoundingBox3d(
                 Math.min(eye.x, end.x) - 2, Math.min(eye.y, end.y) - 2, Math.min(eye.z, end.z) - 2,
                 Math.max(eye.x, end.x) + 2, Math.max(eye.y, end.y) + 2, Math.max(eye.z, end.z) + 2);
 
         ServerSubLevel best = null;
+        Vec3 bestHit = null;
         double bestDist = Double.POSITIVE_INFINITY;
         for (final SubLevelAccess sub : SableCompanion.INSTANCE.getAllIntersecting(level, aabb)) {
             if (!(sub instanceof final ServerSubLevel server)) continue;
@@ -307,10 +416,13 @@ public final class GravityGunServerHandler {
             if (d < bestDist) {
                 bestDist = d;
                 best = server;
+                bestHit = hit.get();
             }
         }
-        return best;
+        return best == null ? null : new SubLevelHit(best, bestHit);
     }
+
+    private record SubLevelHit(ServerSubLevel sub, Vec3 hit) {}
 
     private static Vector3d localCenterOfMass(final ServerSubLevel sub) {
         final MassData mass = sub.getMassTracker();
@@ -327,7 +439,7 @@ public final class GravityGunServerHandler {
         if (distance < 0.001) {
             return new Vector3d();
         }
-        final double speed = Math.min(CARRY_MAX_SPEED, distance * 20.0);
+        final double speed = Math.min(carryMaxSpeed(), distance * 20.0);
         final Vec3 velocity = displacement.normalize().scale(speed);
         return new Vector3d(velocity.x, velocity.y, velocity.z);
     }
@@ -338,7 +450,7 @@ public final class GravityGunServerHandler {
         if (distance < 0.001) {
             return Vec3.ZERO;
         }
-        final double speed = Math.min(ENTITY_CARRY_MAX_SPEED, distance);
+        final double speed = Math.min(entityCarryMaxSpeed(), distance);
         return displacement.normalize().scale(speed);
     }
 
@@ -348,7 +460,7 @@ public final class GravityGunServerHandler {
                 (box.maxY - box.minY) * 0.5,
                 (box.maxZ - box.minZ) * 0.5,
                 look);
-        return Math.max(MIN_HOLD, Math.min(MAX_HOLD, CARRY_BASE_DISTANCE + radius * CARRY_RADIUS_SCALE));
+        return Math.max(minHold(), Math.min(maxHold(), CARRY_BASE_DISTANCE + radius * CARRY_RADIUS_SCALE));
     }
 
     private static double holdDistance(final BoundingBox3dc box, final Vec3 look) {
@@ -357,7 +469,7 @@ public final class GravityGunServerHandler {
                 (box.maxY() - box.minY()) * 0.5,
                 (box.maxZ() - box.minZ()) * 0.5,
                 look);
-        return Math.max(MIN_HOLD, Math.min(MAX_HOLD, CARRY_BASE_DISTANCE + radius * CARRY_RADIUS_SCALE));
+        return Math.max(minHold(), Math.min(maxHold(), CARRY_BASE_DISTANCE + radius * CARRY_RADIUS_SCALE));
     }
 
     private static double projectedRadius(final double halfX, final double halfY, final double halfZ, final Vec3 look) {

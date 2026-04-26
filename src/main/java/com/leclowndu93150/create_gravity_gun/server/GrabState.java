@@ -11,6 +11,7 @@ public final class GrabState {
     public final Vector3d subLevelLocalAnchor = new Vector3d();
     public double holdDistance = 4.0;
     public boolean freshGrab = false;
+    public long lastDenyTick = Long.MIN_VALUE;
 
     public boolean isHolding() {
         return this.grabbedSubLevel != null || this.grabbedEntity != null;

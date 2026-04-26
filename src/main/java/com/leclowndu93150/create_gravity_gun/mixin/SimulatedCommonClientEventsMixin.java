@@ -1,6 +1,7 @@
 package com.leclowndu93150.create_gravity_gun.mixin;
 
 import com.leclowndu93150.create_gravity_gun.client.GravityGunClientVisuals;
+import com.leclowndu93150.create_gravity_gun.client.GravityGunViewKick;
 import dev.simulated_team.simulated.events.SimulatedCommonClientEvents;
 import net.minecraft.client.Minecraft;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,5 +14,6 @@ public abstract class SimulatedCommonClientEventsMixin {
     @Inject(method = "postClientTick", at = @At("RETURN"))
     private static void cpg$tickPhysicsGunVisuals(final Minecraft instance, final CallbackInfo ci) {
         GravityGunClientVisuals.clientTick();
+        GravityGunViewKick.tick();
     }
 }

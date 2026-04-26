@@ -8,7 +8,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
 public record GravityGunPacket(Action action, double dx, double dy, double dz) implements CustomPacketPayload {
-    public enum Action { TOGGLE_GRAB, PUNT, ADJUST_DISTANCE }
+    public enum Action { TOGGLE_GRAB, PUNT, ADJUST_DISTANCE, TOGGLE_SOUNDS }
 
     public static final Type<GravityGunPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(CreateGravityGun.MODID, "gun_action"));

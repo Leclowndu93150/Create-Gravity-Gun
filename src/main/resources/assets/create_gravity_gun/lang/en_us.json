@@ -3,5 +3,17 @@
   "item.create_gravity_gun.gravity_gun.tooltip.grab": "Right Click to grab and hold objects",
   "item.create_gravity_gun.gravity_gun.tooltip.punt": "Left Click to punt held objects away",
   "item.create_gravity_gun.gravity_gun.tooltip.scroll": "Scroll while grabbing to push or pull",
-  "itemGroup.create_gravity_gun": "Create: Gravity Gun"
+  "item.create_gravity_gun.gravity_gun.tooltip.toggle_sounds": "Shift + Right Click to toggle sounds: %s",
+  "item.create_gravity_gun.gravity_gun.tooltip.sounds_on": "ON",
+  "item.create_gravity_gun.gravity_gun.tooltip.sounds_off": "OFF",
+  "itemGroup.create_gravity_gun": "Create: Gravity Gun",
+  "subtitle.create_gravity_gun.pickup": "Gravity Gun grabs",
+  "subtitle.create_gravity_gun.drop": "Gravity Gun releases",
+  "subtitle.create_gravity_gun.dryfire": "Gravity Gun whirrs",
+  "subtitle.create_gravity_gun.too_heavy": "Gravity Gun strains",
+  "subtitle.create_gravity_gun.claws_open": "Gravity Gun claws open",
+  "subtitle.create_gravity_gun.claws_close": "Gravity Gun claws close",
+  "subtitle.create_gravity_gun.hold_loop": "Gravity Gun hums",
+  "subtitle.create_gravity_gun.physgun_off": "Gravity Gun powers down",
+  "subtitle.create_gravity_gun.launch": "Gravity Gun launches"
 }

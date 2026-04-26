@@ -1,0 +1,52 @@
+{
+  "pickup": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.pickup",
+    "sounds": [{ "name": "create_gravity_gun:pickup", "stream": false }]
+  },
+  "drop": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.drop",
+    "sounds": [{ "name": "create_gravity_gun:drop", "stream": false }]
+  },
+  "dryfire": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.dryfire",
+    "sounds": [{ "name": "create_gravity_gun:dryfire", "stream": false }]
+  },
+  "too_heavy": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.too_heavy",
+    "sounds": [{ "name": "create_gravity_gun:too_heavy", "stream": false }]
+  },
+  "claws_open": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.claws_open",
+    "sounds": [{ "name": "create_gravity_gun:claws_open", "stream": false }]
+  },
+  "claws_close": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.claws_close",
+    "sounds": [{ "name": "create_gravity_gun:claws_close", "stream": false }]
+  },
+  "hold_loop": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.hold_loop",
+    "sounds": [{ "name": "create_gravity_gun:hold_loop", "stream": true }]
+  },
+  "physgun_off": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.physgun_off",
+    "sounds": [{ "name": "create_gravity_gun:physgun_off", "stream": false }]
+  },
+  "launch": {
+    "category": "player",
+    "subtitle": "subtitle.create_gravity_gun.launch",
+    "sounds": [
+      { "name": "create_gravity_gun:launch1", "stream": false },
+      { "name": "create_gravity_gun:launch2", "stream": false },
+      { "name": "create_gravity_gun:launch3", "stream": false },
+      { "name": "create_gravity_gun:launch4", "stream": false }
+    ]
+  }
+}

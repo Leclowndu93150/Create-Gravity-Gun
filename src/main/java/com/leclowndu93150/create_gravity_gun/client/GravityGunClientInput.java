@@ -1,6 +1,7 @@
 package com.leclowndu93150.create_gravity_gun.client;
 
 import com.leclowndu93150.create_gravity_gun.CreateGravityGun;
+import com.leclowndu93150.create_gravity_gun.config.GravityGunConfig;
 import com.leclowndu93150.create_gravity_gun.item.GravityGunItem;
 import com.leclowndu93150.create_gravity_gun.network.GravityGunPacket;
 import net.minecraft.client.Minecraft;
@@ -32,9 +33,13 @@ public final class GravityGunClientInput {
         if (event.getAction() != GLFW.GLFW_PRESS) return;
 
         if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
-            send(new GravityGunPacket(GravityGunPacket.Action.TOGGLE_GRAB, 0, 0, 0));
-            if (GravityGunClientVisuals.isGrabbing()) {
-                GravityGunClientVisuals.clear();
+            if (Minecraft.getInstance().player != null && Minecraft.getInstance().player.isShiftKeyDown()) {
+                send(new GravityGunPacket(GravityGunPacket.Action.TOGGLE_SOUNDS, 0, 0, 0));
+            } else {
+                send(new GravityGunPacket(GravityGunPacket.Action.TOGGLE_GRAB, 0, 0, 0));
+                if (GravityGunClientVisuals.isGrabbing()) {
+                    GravityGunClientVisuals.clear();
+                }
             }
             event.setCanceled(true);
         } else if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
@@ -48,7 +53,7 @@ public final class GravityGunClientInput {
     public static void onScroll(final InputEvent.MouseScrollingEvent event) {
         if (Minecraft.getInstance().screen != null) return;
         if (!holdingGun() || !GravityGunClientVisuals.isGrabbing()) return;
-        send(new GravityGunPacket(GravityGunPacket.Action.ADJUST_DISTANCE, 0, event.getScrollDeltaY() * 0.5, 0));
+        send(new GravityGunPacket(GravityGunPacket.Action.ADJUST_DISTANCE, 0, event.getScrollDeltaY() * GravityGunConfig.scrollSensitivity, 0));
         event.setCanceled(true);
     }
 
