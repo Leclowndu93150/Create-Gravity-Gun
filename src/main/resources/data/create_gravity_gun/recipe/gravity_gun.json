@@ -12,10 +12,10 @@
       "item": "create:electron_tube"
     },
     "R": {
-      "item": "create:refined_radiance"
+      "item": "create:polished_rose_quartz"
     },
     "S": {
-      "item": "create:shadow_steel"
+      "item": "create:sturdy_sheet"
     },
     "N": {
       "item": "minecraft:netherite_ingot"
@@ -24,7 +24,7 @@
       "item": "minecraft:nether_star"
     },
     "C": {
-      "item": "create:chromatic_compound"
+      "item": "create:experience_nugget"
     }
   },
   "pattern": [
