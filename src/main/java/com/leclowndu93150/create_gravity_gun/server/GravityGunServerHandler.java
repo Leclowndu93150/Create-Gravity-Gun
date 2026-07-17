@@ -9,12 +9,12 @@ import com.leclowndu93150.create_gravity_gun.network.GravityGunMotionPacket;
 import com.leclowndu93150.create_gravity_gun.network.GravityGunPacket;
 import com.leclowndu93150.create_gravity_gun.network.GravityGunSyncPacket;
 import dev.ryanhcode.sable.api.physics.PhysicsPipelineBody;
+import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
-import dev.ryanhcode.sable.physics.impl.rapier.Rapier3D;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
@@ -245,43 +245,37 @@ public final class GravityGunServerHandler {
         final MassData mass = sub.getMassTracker();
         if (mass == null || mass.isInvalid()) return;
 
-        final int sceneId = Rapier3D.getID(level);
         final int bodyId = sub.getRuntimeId();
         if (bodyId == PhysicsPipelineBody.NULL_RUNTIME_ID) return;
 
+        final RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) return;
+
         final Vector3d anchor = sub.logicalPose().transformPosition(localAnchor, new Vector3d());
 
-        final double[] linVel = new double[3];
-        final double[] angVel = new double[3];
-        Rapier3D.getLinearVelocity(sceneId, bodyId, linVel);
-        Rapier3D.getAngularVelocity(sceneId, bodyId, angVel);
+        final Vector3d linVel = handle.getLinearVelocity(new Vector3d());
+        final Vector3d angVel = handle.getAngularVelocity(new Vector3d());
 
         if (fresh) {
-            final Vector3d linearStop = clamp(new Vector3d(-linVel[0], -linVel[1], -linVel[2]), maxLinearDeltaV());
-            final Vector3d angularStop = clamp(new Vector3d(-angVel[0], -angVel[1], -angVel[2]), MAX_ANGULAR_DELTA_V);
-            Rapier3D.addLinearAngularVelocities(sceneId, bodyId,
-                    linearStop.x, linearStop.y, linearStop.z,
-                    angularStop.x, angularStop.y, angularStop.z,
-                    true);
+            final Vector3d linearStop = clamp(new Vector3d(-linVel.x, -linVel.y, -linVel.z), maxLinearDeltaV());
+            final Vector3d angularStop = clamp(new Vector3d(-angVel.x, -angVel.y, -angVel.z), MAX_ANGULAR_DELTA_V);
+            handle.addLinearAndAngularVelocity(linearStop, angularStop);
             return;
         }
 
         final Vector3d desiredVelocity = desiredCarryVelocity(new Vec3(anchor.x, anchor.y, anchor.z), target);
         final Vector3d linearDelta = clamp(new Vector3d(
-                desiredVelocity.x - linVel[0],
-                desiredVelocity.y - linVel[1],
-                desiredVelocity.z - linVel[2]
+                desiredVelocity.x - linVel.x,
+                desiredVelocity.y - linVel.y,
+                desiredVelocity.z - linVel.z
         ), maxLinearDeltaV());
         final Vector3d angularDelta = clamp(new Vector3d(
-                -angVel[0] * 0.5,
-                -angVel[1] * 0.5,
-                -angVel[2] * 0.5
+                -angVel.x * 0.5,
+                -angVel.y * 0.5,
+                -angVel.z * 0.5
         ), MAX_ANGULAR_DELTA_V);
 
-        Rapier3D.addLinearAngularVelocities(sceneId, bodyId,
-                linearDelta.x, linearDelta.y, linearDelta.z,
-                angularDelta.x, angularDelta.y, angularDelta.z,
-                true);
+        handle.addLinearAndAngularVelocity(linearDelta, angularDelta);
     }
 
     private static void pullEntity(final Entity entity, final Vec3 target, final boolean fresh) {
@@ -325,13 +319,15 @@ public final class GravityGunServerHandler {
         final ServerLevel level = player.serverLevel();
         final SubLevelPhysicsSystem system = SubLevelPhysicsSystem.get(level);
         if (system == null) return;
-        final int sceneId = Rapier3D.getID(level);
         final int bodyId = sub.getRuntimeId();
         if (bodyId == PhysicsPipelineBody.NULL_RUNTIME_ID) return;
 
-        Rapier3D.addLinearAngularVelocities(sceneId, bodyId,
-                look.x * speed, look.y * speed, look.z * speed,
-                0.0, 0.0, 0.0, true);
+        final RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) return;
+
+        handle.addLinearAndAngularVelocity(
+                new Vector3d(look.x * speed, look.y * speed, look.z * speed),
+                new Vector3d(0.0, 0.0, 0.0));
     }
 
     private static void puntSubLevelOffCenter(final ServerPlayer player, final ServerSubLevel sub, final Vec3 hitWorld,
@@ -339,25 +335,20 @@ public final class GravityGunServerHandler {
         final ServerLevel level = player.serverLevel();
         final SubLevelPhysicsSystem system = SubLevelPhysicsSystem.get(level);
         if (system == null) return;
-        final int sceneId = Rapier3D.getID(level);
         final int bodyId = sub.getRuntimeId();
         if (bodyId == PhysicsPipelineBody.NULL_RUNTIME_ID) return;
+
+        final RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) return;
 
         final MassData mass = sub.getMassTracker();
         final double bodyMass = mass != null && !mass.isInvalid() ? Math.max(mass.getMass(), 1.0) : 10.0;
 
-        final Vector3d comWorld = sub.logicalPose().transformPosition(localCenterOfMass(sub), new Vector3d());
-        final Vector3d arm = new Vector3d(hitWorld.x - comWorld.x, hitWorld.y - comWorld.y, hitWorld.z - comWorld.z);
-
-        final Vector3d forceDir = new Vector3d(look.x, look.y, look.z);
+        final Vector3d point = new Vector3d(hitWorld.x, hitWorld.y, hitWorld.z);
         final double impulse = bodyMass * speed;
-        final Vector3d force = new Vector3d(forceDir).mul(impulse);
-        final Vector3d torque = arm.cross(force, new Vector3d());
+        final Vector3d force = new Vector3d(look.x, look.y, look.z).mul(impulse);
 
-        Rapier3D.applyForceAndTorque(sceneId, bodyId,
-                force.x, force.y, force.z,
-                torque.x, torque.y, torque.z,
-                true);
+        handle.applyImpulseAtPoint(point, force);
     }
 
     private static void puntEntity(final Entity entity, final Vec3 look, final double speed) {
